@@ -6,7 +6,6 @@ use SilverStripe\CMS\Model\SiteTree;
 use SilverStripe\Control\Controller;
 use SilverStripe\Core\Convert;
 use SilverStripe\Core\Injector\Injectable;
-use SilverStripe\ORM\DB;
 use SilverStripe\ORM\SS_List;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\Versioned\Versioned;
@@ -204,66 +203,5 @@ abstract class CMSBatchAction
     public function applicablePages($ids)
     {
         return $ids;
-    }
-
-    /**
-     * Provide confirmation dialog data including descendant counts.
-     * Called by CMSBatchActionHandler::handleConfirmation() to allow
-     * dynamic confirmation messages based on the actual pages selected.
-     *
-     * @param array $ids List of page IDs selected for this action
-     * @return array Associative array with confirmation data:
-     *  - 'alert' (bool) whether to show a confirmation
-     *  - 'numPages' (int) number of directly selected pages
-     *  - 'descendantCount' (int) total number of descendant pages
-     */
-    public function confirmationDialog($ids)
-    {
-        if (empty($ids)) {
-            return ['alert' => false];
-        }
-
-        $descendantCount = $this->countDescendantsForIds($ids);
-
-        return [
-            'alert' => true,
-            'numPages' => count($ids),
-            'descendantCount' => $descendantCount,
-        ];
-    }
-
-    /**
-     * Count all descendant pages for a set of page IDs using iterative
-     * breadth-first queries that walk the hierarchy via ParentID.
-     *
-     * @param array $ids List of page IDs
-     * @return int Total number of descendant pages
-     */
-    protected function countDescendantsForIds($ids)
-    {
-        $managedClass = $this->managedClass;
-        $table = DataObject::getSchema()->baseDataTable($managedClass);
-
-        $currentIds = array_map('intval', $ids);
-        $descendantCount = 0;
-
-        // Walk the tree level by level
-        while (!empty($currentIds)) {
-            $placeholders = DB::placeholders($currentIds);
-            $childIds = DB::query(
-                "SELECT \"ID\" FROM \"{$table}\" WHERE \"ParentID\" IN ({$placeholders})",
-                $currentIds
-            )->column();
-
-            if (empty($childIds)) {
-                break;
-            }
-
-            $childIds = array_map('intval', $childIds);
-            $descendantCount += count($childIds);
-            $currentIds = $childIds;
-        }
-
-        return $descendantCount;
     }
 }

@@ -62,8 +62,6 @@ $.entwine('ss.tree', function($){
      * @desc Register default bulk confirmation dialogs
      */
     registerDefault: function() {
-      var self = this;
-
       // Publish selected pages action
       this.register('publish', function(ids) {
         var confirmed = confirm(
@@ -94,13 +92,16 @@ $.entwine('ss.tree', function($){
 
       // Delete and archive selected pages action
       this.register('delete', function(ids) {
-        return self.fetchConfirmation(ids, 'delete');
-      });
-
-      // Archive selected pages action (may be registered by silverstripe-cms,
-      // but we provide the default here for consistency)
-      this.register('archive', function(ids) {
-        return self.fetchConfirmation(ids, 'archive');
+        var confirmed = confirm(
+          i18n.inject(
+            i18n._t(
+              "Admin.BATCH_DELETE_PROMPT",
+              "You have {num} page(s) selected.\n\nAre you sure you want to delete these pages?\n\nThese pages and all of their children pages will be deleted and sent to the archive."
+            ),
+            {'num': ids.length}
+          )
+        );
+        return (confirmed) ? ids : false;
       });
 
       // Restore selected archived pages
@@ -121,217 +122,6 @@ $.entwine('ss.tree', function($){
     onadd: function() {
       this.registerDefault();
       this._super();
-    },
-
-    /**
-     * @func fetchConfirmation
-     * @desc Fetch descendant count from the server and show an appropriate
-     *       confirmation modal. Falls back to a static confirm() if the
-     *       server request fails.
-     * @param {array} ids - Selected page IDs
-     * @param {string} actionType - 'delete' or 'archive'
-     * @return {jQuery.Deferred} Resolves with ids if confirmed, false if cancelled
-     */
-    fetchConfirmation: function(ids, actionType) {
-      var deferred = $.Deferred();
-      var self = this;
-      var actionUrl = this.find(':input[name=Action]').val();
-      var upperType = actionType.toUpperCase();
-
-      // Fallback i18n keys
-      var fallbackKey = 'Admin.BATCH_' + upperType + '_PROMPT';
-      var fallbackMsg = (actionType === 'archive')
-        ? "You have {num} page(s) selected.\n\nAre you sure you want to archive these pages?\n\nThese pages and all of their children pages will be unpublished and sent to the archive."
-        : "You have {num} page(s) selected.\n\nAre you sure you want to delete these pages?\n\nThese pages and all of their children pages will be deleted and sent to the archive.";
-
-      if (!actionUrl) {
-        deferred.resolve(false);
-        return deferred.promise();
-      }
-
-      // Build the confirmation endpoint URL
-      var actionUrlParts = $.path.parseUrl(actionUrl);
-      var confirmUrl = actionUrlParts.hrefNoSearch + '/confirmation/';
-      confirmUrl = $.path.addSearchParams(confirmUrl, actionUrlParts.search);
-      confirmUrl = $.path.addSearchParams(confirmUrl, { csvIDs: ids.join(',') });
-
-      jQuery.ajax({
-        url: confirmUrl,
-        type: 'GET',
-        dataType: 'json',
-        success: function(data) {
-          if (data && data.descendantCount > 0) {
-            // Pages have descendants — show a prominent warning modal
-            var title = i18n._t(
-              'Admin.BATCH_' + upperType + '_CONFIRM_TITLE',
-              actionType.charAt(0).toUpperCase() + actionType.slice(1) + ' pages'
-            );
-            var bodyMsg = i18n.inject(
-              i18n._t(
-                'Admin.BATCH_' + upperType + '_PROMPT_WITH_DESCENDANTS',
-                "You have {num} page(s) selected.\n\nWARNING: These pages have a total of {descendantCount} child/descendant page(s) that will ALSO be " + actionType + "d.\n\nThis action may be difficult to undo."
-              ),
-              { 'num': ids.length, 'descendantCount': data.descendantCount }
-            );
-            var confirmLabel = i18n.inject(
-              i18n._t(
-                'Admin.BATCH_' + upperType + '_CONFIRM_BUTTON',
-                actionType.charAt(0).toUpperCase() + actionType.slice(1) + ' {total} pages'
-              ),
-              { 'total': ids.length + data.descendantCount }
-            );
-            self._showConfirmModal(title, bodyMsg, confirmLabel, function() {
-              deferred.resolve(ids);
-            }, function() {
-              deferred.resolve(false);
-            });
-          } else {
-            // No descendants — show a simple confirm
-            var message = i18n.inject(
-              i18n._t(
-                'Admin.BATCH_' + upperType + '_PROMPT_NO_DESCENDANTS',
-                "You have {num} page(s) selected.\n\nAre you sure you want to " + actionType + " these pages?"
-              ),
-              { 'num': ids.length }
-            );
-            // eslint-disable-next-line no-alert
-            var confirmed = confirm(message);
-            deferred.resolve(confirmed ? ids : false);
-          }
-        },
-        error: function() {
-          // Fallback to static confirm() if the server endpoint fails
-          // eslint-disable-next-line no-alert
-          var confirmed = confirm(
-            i18n.inject(
-              i18n._t(fallbackKey, fallbackMsg),
-              { 'num': ids.length }
-            )
-          );
-          deferred.resolve(confirmed ? ids : false);
-        }
-      });
-
-      return deferred.promise();
-    },
-
-    /**
-     * @func _showConfirmModal
-     * @desc Show a Bootstrap modal for destructive action confirmation.
-     * @param {string} title - Modal title
-     * @param {string} bodyText - Warning message (newlines converted to <br>)
-     * @param {string} confirmLabel - Text for the confirm button
-     * @param {function} onConfirm - Called when the user confirms
-     * @param {function} onCancel - Called when the user cancels
-     */
-    _showConfirmModal: function(title, bodyText, confirmLabel, onConfirm, onCancel) {
-      // Remove any existing modal
-      $('#batch-action-confirm-modal').remove();
-
-      // Convert newlines to HTML breaks and highlight WARNING text
-      var bodyHtml = $('<div/>').text(bodyText).html()
-        .replace(/\n/g, '<br>')
-        .replace(
-          /WARNING:/g,
-          '<strong style="color: #d32f2f; font-size: 1.1em;">WARNING:</strong>'
-        );
-
-      var modal = $(
-        '<div class="modal fade" id="batch-action-confirm-modal" tabindex="-1" role="dialog">' +
-          '<div class="modal-dialog" role="document">' +
-            '<div class="modal-content">' +
-              '<div class="modal-header">' +
-                '<h4 class="modal-title">' + $('<span/>').text(title).html() + '</h4>' +
-                '<button type="button" class="close" data-dismiss="modal" aria-label="Close">' +
-                  '<span aria-hidden="true">&times;</span>' +
-                '</button>' +
-              '</div>' +
-              '<div class="modal-body">' +
-                '<p>' + bodyHtml + '</p>' +
-              '</div>' +
-              '<div class="modal-footer">' +
-                '<button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>' +
-                '<button type="button" class="btn btn-danger" id="batch-action-confirm-btn">' +
-                  $('<span/>').text(confirmLabel).html() +
-                '</button>' +
-              '</div>' +
-            '</div>' +
-          '</div>' +
-        '</div>'
-      );
-
-      var resolved = false;
-      modal.find('#batch-action-confirm-btn').on('click', function() {
-        resolved = true;
-        modal.modal('hide');
-        if (onConfirm) onConfirm();
-      });
-
-      modal.on('hidden.bs.modal', function() {
-        modal.remove();
-        if (!resolved && onCancel) onCancel();
-      });
-
-      $('body').append(modal);
-      modal.modal('show');
-    },
-
-    /**
-     * @func _submitAction
-     * @desc Submit the batch action via AJAX. Extracted from onsubmit
-     *       to support both sync and async confirmation flows.
-     * @param {string} actionURL
-     */
-    _submitAction: function(actionURL) {
-      var self = this,
-        tree = this.getTree();
-
-      // Reset failure states
-      tree.find('li').removeClass('failed');
-
-      var button = this.find(':submit:first');
-      button.addClass('loading');
-
-      jQuery.ajax({
-        url: actionURL,
-        type: 'POST',
-        data: this.serializeArray(),
-        complete: function(xmlhttp, status) {
-          button.removeClass('loading');
-          tree.jstree('refresh', -1);
-          self.setIDs([]);
-          self.find(':input[name=Action]').val('').change();
-
-          var msg = xmlhttp.getResponseHeader('X-Status');
-          if(msg) statusMessage(decodeURIComponent(msg), (status == 'success') ? 'good' : 'bad');
-        },
-        success: function(data, status) {
-          var id, node;
-
-          if(data.modified) {
-            var modifiedNodes = [];
-            for(id in data.modified) {
-              node = tree.getNodeByID(id);
-              tree.jstree('set_text', node, data.modified[id]['TreeTitle']);
-              modifiedNodes.push(node);
-            }
-            $(modifiedNodes).effect('highlight');
-          }
-          if(data.deleted) {
-            for(id in data.deleted) {
-              node = tree.getNodeByID(id);
-              if(node.length)  tree.jstree('delete_node', node);
-            }
-          }
-          if(data.error) {
-            for(id in data.error) {
-              node = tree.getNodeByID(id);
-              $(node).addClass('failed');
-            }
-          }
-        },
-        dataType: 'json'
-      });
     },
 
     /**
@@ -454,6 +244,7 @@ $.entwine('ss.tree', function($){
     onsubmit: function(e) {
       var self = this,
         ids = this.getIDs(),
+        tree = this.getTree(),
         actions = this.getActions();
 
       // if no nodes are selected, return with an error
@@ -472,26 +263,9 @@ $.entwine('ss.tree', function($){
 
       // Validate action
       var type = actionURL.split('/').filter(n => !!n).pop();
-      var result = ids;
       if(actions[type]) {
-        result = actions[type].apply(this, [ids]);
+        ids = actions[type].apply(this, [ids]);
       }
-
-      // Support async (Promise/Deferred) callbacks for actions that
-      // need to fetch data from the server before confirming
-      if (result && typeof result.then === 'function') {
-        result.then(function(resolvedIds) {
-          if (resolvedIds && resolvedIds.length) {
-            self.setIDs(resolvedIds);
-            self._submitAction(actionURL);
-          }
-        });
-        e.preventDefault();
-        return false;
-      }
-
-      // Synchronous path (existing behaviour for publish, unpublish, restore, etc.)
-      ids = result;
 
       // Discontinue processing if there are no further items
       if(!ids || !ids.length) {
@@ -501,7 +275,60 @@ $.entwine('ss.tree', function($){
 
       // write (possibly modified) IDs back into to the hidden field
       this.setIDs(ids);
-      this._submitAction(actionURL);
+
+      // Reset failure states
+      tree.find('li').removeClass('failed');
+
+      var button = this.find(':submit:first');
+      button.addClass('loading');
+
+      jQuery.ajax({
+        // don't use original form url
+        url: actionURL,
+        type: 'POST',
+        data: this.serializeArray(),
+        complete: function(xmlhttp, status) {
+          button.removeClass('loading');
+
+          // Refresh the tree.
+          // Makes sure all nodes have the correct CSS classes applied.
+          tree.jstree('refresh', -1);
+          self.setIDs([]);
+
+          // Reset action
+          self.find(':input[name=Action]').val('').change();
+
+          // status message (decode into UTF-8, HTTP headers don't allow multibyte)
+          var msg = xmlhttp.getResponseHeader('X-Status');
+          if(msg) statusMessage(decodeURIComponent(msg), (status == 'success') ? 'good' : 'bad');
+        },
+        success: function(data, status) {
+          var id, node;
+
+          if(data.modified) {
+            var modifiedNodes = [];
+            for(id in data.modified) {
+              node = tree.getNodeByID(id);
+              tree.jstree('set_text', node, data.modified[id]['TreeTitle']);
+              modifiedNodes.push(node);
+            }
+            $(modifiedNodes).effect('highlight');
+          }
+          if(data.deleted) {
+            for(id in data.deleted) {
+              node = tree.getNodeByID(id);
+              if(node.length)  tree.jstree('delete_node', node);
+            }
+          }
+          if(data.error) {
+            for(id in data.error) {
+              node = tree.getNodeByID(id);
+              $(node).addClass('failed');
+            }
+          }
+        },
+        dataType: 'json'
+      });
 
       // Never process this action; Only invoke via ajax
       e.preventDefault();
